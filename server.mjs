@@ -2,13 +2,13 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import sgMail from "@sendgrid/mail";
 
 dotenv.config();
 
 const app = express();
-const PORT = 2000;
+const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors());
@@ -17,6 +17,11 @@ app.use(express.json());
 // Multer config for file uploads
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+
+// SendGrid setup
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+const EMAIL_TO = process.env.EMAIL_TO;
+const EMAIL_FROM = process.env.EMAIL_FROM; // must be a verified sender in SendGrid
 
 // Helper to safely get body fields
 const getField = (obj, key) => (obj[key] ? obj[key] : "");
@@ -33,42 +38,28 @@ app.post(
   ]),
   async (req, res) => {
     try {
-      const { phone, name, email, city, companyName, address, loanType } = req.body;
       const files = req.files;
 
       console.log("Form data:", req.body);
       console.log("Files uploaded:", files);
 
-      // Nodemailer transporter
-    const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: parseInt(process.env.EMAIL_PORT),
-  secure: process.env.SMTP_SECURE === "true",
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-      // Verify connection before sending
-      await transporter.verify();
-      console.log("SMTP server is ready");
-
-      // Prepare attachments
+      // Prepare attachments for SendGrid
       const attachments = [];
       if (files) {
         for (const key in files) {
           attachments.push({
+            content: files[key][0].buffer.toString("base64"),
             filename: files[key][0].originalname,
-            content: files[key][0].buffer,
+            type: files[key][0].mimetype,
+            disposition: "attachment",
           });
         }
       }
 
       // Email content
-      const mailOptions = {
-        from: `"Loan Application" <${process.env.SMTP_USER}>`,
-        to: process.env.EMAIL_TO,
+      const msg = {
+        to: EMAIL_TO,
+        from: EMAIL_FROM,
         subject: `New Loan Application - ${getField(req.body, "loanType")}`,
         html: `
           <h2>New Loan Application</h2>
@@ -83,11 +74,11 @@ app.post(
         attachments,
       };
 
-      await transporter.sendMail(mailOptions);
+      await sgMail.send(msg);
 
       return res.status(200).json({ message: "Loan application sent successfully" });
     } catch (err) {
-      console.error("Error sending email:", err);
+      console.error("SendGrid Error:", err);
       return res.status(500).json({
         message: "Error sending loan application",
         error: err.message || err,
@@ -96,6 +87,6 @@ app.post(
   }
 );
 
-app.listen(2000, () => {
-  console.log(`Server running on http://localhost:2000`);
+app.listen(4000, () => {
+  console.log(`Server running on http://localhost:4000`);
 });
